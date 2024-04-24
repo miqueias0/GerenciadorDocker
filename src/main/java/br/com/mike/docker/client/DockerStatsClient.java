@@ -1,19 +1,14 @@
 package br.com.mike.docker.client;
 
 import br.com.mike.docker.modelo.DockerContainerStats;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.client.RestTemplate;
+import jakarta.ws.rs.*;
+import jakarta.ws.rs.core.MediaType;
 
-public class DockerStatsClient {
+@Path("/containers")
+public interface DockerStatsClient {
 
-    private RestTemplate restTemplate;
-
-    @Autowired
-    public DockerStatsClient(RestTemplate restTemplate) {
-        this.restTemplate = restTemplate;
-    }
-
-    public DockerContainerStats obterDockerStats(String id){
-        return restTemplate.getForObject("http://localhost:2375/containers/" + id + "/stats?stream=0", DockerContainerStats.class);
-    }
+    @GET
+    @Path("/{id}/stats")
+    @Produces(MediaType.APPLICATION_JSON)
+    DockerContainerStats obterDockerStats(@PathParam("id") String id, @QueryParam("stream") int stream);
 }

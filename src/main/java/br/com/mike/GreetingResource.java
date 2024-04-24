@@ -1,12 +1,17 @@
 package br.com.mike;
 
 import br.com.mike.docker.DockerService;
+import br.com.mike.docker.DockerVerificador;
+import io.quarkus.runtime.Startup;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import org.checkerframework.checker.units.qual.Time;
 
 @Path("/docker")
+@Startup
 public class GreetingResource {
 
     @GET
@@ -47,4 +52,15 @@ public class GreetingResource {
         return "Container derrubado com sucesso!";
     }
 
+    Thread thread;
+
+    @PostConstruct
+    public void iniciarProcessoVerificacao() throws Exception {
+        thread = new DockerVerificador(dockerService);
+        thread.start();
+    }
+    @PreDestroy
+    public void onDestroy() {
+        thread = null;
+    }
 }

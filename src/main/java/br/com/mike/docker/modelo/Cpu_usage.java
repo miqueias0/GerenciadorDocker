@@ -1,7 +1,5 @@
 package br.com.mike.docker.modelo;
 
-import java.util.List;
-
 public class Cpu_usage {
     private long total_usage;
     private long[] percpu_usage;
