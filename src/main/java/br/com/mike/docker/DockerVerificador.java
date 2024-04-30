@@ -10,7 +10,9 @@ public class DockerVerificador extends Thread{
     @Override
     public void run() {
         try {
-            dockerClient.verificarStatsDocker(dockerClient.dockerClient);
+            while (true){
+                dockerClient.verificarStatsDocker();
+            }
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

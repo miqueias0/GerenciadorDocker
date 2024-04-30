@@ -25,6 +25,11 @@ public class ApiPortaService {
         return repository.findAllByEndpoint(name).orElse(null);
     }
 
+    @ActivateRequestContext
+    public List<ApiPorta> obterLista(){
+        return repository.findAll();
+    }
+
     @Transactional
     public ApiPorta save(ApiPorta apiPorta){
         return repository.save(apiPorta);

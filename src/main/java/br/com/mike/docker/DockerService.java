@@ -62,7 +62,8 @@ public class DockerService {
     }
 
     public void subirContainer(String image, String containerName) throws Exception {
-        subirContainer(image, containerName, 8081);
+        Integer ultimaPorta = ultimaPorta();
+        subirContainer(image, containerName, ultimaPorta > 0 ? ultimaPorta + 1 : 8081);
     }
 
     public void subirContainer(String image, String containerName, Integer porta) throws Exception {
@@ -75,7 +76,7 @@ public class DockerService {
                 list.add(ExposedPort.parse(8081 + "/tcp"));
                 HostConfig hostConfig = service.criarHost(service.obterConfiguracaoContainer(containerName.contains("_") ? containerName.split("_")[0] : containerName));
                 hostConfig.withPortBindings(portBindings);
-                apiPortaService.save(montarApiPorta(porta.longValue(), containerName));
+                hostConfig.withNetworkMode("microservice");
                 CreateContainerResponse containerResponse = dockerClient.createContainerCmd(image)
                         .withName(containerName)
                         .withHostConfig(hostConfig)
@@ -89,7 +90,7 @@ public class DockerService {
         }
     }
 
-    private ApiPorta montarApiPorta(Long porta, String containerNome){
+    public ApiPorta montarApiPorta(Long porta, String containerNome) {
         ApiPorta apiPorta = new ApiPorta();
         apiPorta.setPorta(porta);
         apiPorta.setEndpoint(containerNome.contains("_") ? containerNome.split("_")[0] : containerNome);
@@ -99,8 +100,10 @@ public class DockerService {
 
     public void derrubarContainer(String containerName) {
         try {
-            dockerClient.stopContainerCmd(containerName).exec();
-            dockerClient.removeContainerCmd(containerName).exec();
+            if (!verificarCpuMemoria(containerName)) {
+                dockerClient.stopContainerCmd(containerName).exec();
+                dockerClient.removeContainerCmd(containerName).exec();
+            }
         } catch (Exception ex) {
             excluirContainer(containerName);
         }
@@ -124,7 +127,7 @@ public class DockerService {
         dockerClient.removeContainerCmd(containerName).exec();
     }
 
-    private boolean verificarContainerExistente(String containerName) {
+    public boolean verificarContainerExistente(String containerName) {
         try {
             List<Container> containers = dockerClient.listContainersCmd()
                     .withShowAll(true)
@@ -159,21 +162,28 @@ public class DockerService {
                 || (conainers.size() < ++index && percorrerListaContainer(conainers, index, containerName)));
     }
 
-    private Integer ultimaPorta(List<Container> containers) {
+    public Integer ultimaPorta() {
         Integer maior = 0;
+        List<Container> containers = obterContainersRunning();
         for (Container container : containers) {
             for (int i = 0; i < container.getPorts().length; i++) {
-                maior = maior < Optional.ofNullable(container.getPorts()[i].getPublicPort()).orElse(0) ? container.getPorts()[i].getPublicPort() : maior;
+                maior = maior < Optional.ofNullable(container
+                        .getPorts()[i].getPublicPort()).orElse(0) ?
+                        container.getPorts()[i].getPublicPort() : maior;
             }
         }
         return maior;
     }
 
-    public void verificarStatsDocker(DockerClient dockerClientThread) throws Exception {
-        List<Container> containers = dockerClientThread.listContainersCmd()
+    private List<Container> obterContainersRunning() {
+        return dockerClient.listContainersCmd()
                 .withShowAll(false)
                 .withStatusFilter(Arrays.asList("running"))
                 .exec();
+    }
+
+    public void verificarStatsDocker() throws Exception {
+        List<Container> containers = obterContainersRunning();
         for (Container container : containers.stream().filter(x ->
                         !(x.getImage().contains("redis")
                                 || x.getImage().contains("ryuk")))
@@ -183,7 +193,7 @@ public class DockerService {
                 if (verificados.contains(nome.split("_")[0])) {
                     continue;
                 }
-                String verificar = "";
+                String verificar;
                 var valor = Arrays.stream(container.getNames()).map(x -> {
                     try {
                         return nome.contains("_") ? Integer.parseInt(nome.split("_")[1]) : 0;
@@ -208,13 +218,17 @@ public class DockerService {
                 }
                 if (verificarCpuMemoria(verificar)) {
                     subirContainer(container.getImage(),
-                            (verificar.contains("_") ? verificar.split("_")[0] + "_" +
-                                    (Integer.parseInt(verificar.split("_")[1]) + 1) : verificar + "_1"), ultimaPorta(containers) + 1);
+                            adicionarNumeroContainer(verificar), ultimaPorta() + 1);
                 }
             }
         }
         Thread.sleep(10000);
-        verificarStatsDocker(dockerClientThread);
+    }
+
+    public String adicionarNumeroContainer(String nome){
+        return (nome.contains("_") ? nome.split("_")[0] + "_" +
+                (Integer.parseInt(nome.split("_")[1]) + 1) :
+                verificarContainerExistente(nome) ? nome + "_1": nome);
     }
 
     private boolean verificarCpuMemoria(String id) {
@@ -228,11 +242,47 @@ public class DockerService {
                     .multiply(BigDecimal.valueOf(dockerContainerStats.getCpu_stats().getOnline_cpus()))
                     .multiply(BigDecimal.valueOf(100L));
             long memoriaUsada = (dockerContainerStats.getMemory_stats().getMax_usage() / dockerContainerStats.getMemory_stats().getLimit()) * 100;
-            System.out.println(cpuPercent);
             return (cpuPercent.compareTo(BigDecimal.valueOf(80L)) >= 1 && cpuPercent.compareTo(BigDecimal.valueOf(100L)) <= 1) || memoriaUsada >= 80L;
         }
         return false;
+    }
 
+    public void verificarExcluirPortasInexistentes() {
+        try {
+            Thread.sleep(1000);
+            List<Container> containers = dockerClient.listContainersCmd()
+                    .withShowAll(true)
+                    .withNetworkFilter(Arrays.asList("microservice"))
+                    .exec();
+            List<String> nomes = new ArrayList<>();
+            if (containers != null && !containers.isEmpty()) {
+                for (Container container : containers) {
+                    nomes.addAll(List.of(container.getNames()).stream().map(x -> x.substring(1)).toList());
+                    if (container.getPorts() == null || container.getPorts().length == 0) {
+                        continue;
+                    }
+                    ApiPorta apiPorta = apiPortaService.obterApiPortaById(container.getPorts()[0].getPublicPort().longValue());
+                    String nome = container.getNames()[0].substring(1);
+                    if (apiPorta == null) {
+                        apiPorta= montarApiPorta(container.getPorts()[0].getPublicPort().longValue(), nome.split("_")[0]);
+                        apiPorta.setDataUltimaRequisicao(new Date());
+                        apiPortaService.save(apiPorta);
+                        continue;
+                    }
+                    if (!apiPorta.getEndpoint().equalsIgnoreCase(nome)) {
+                        apiPorta.setEndpoint(nome);
+                        apiPorta.setDataUltimaRequisicao(new Date());
+                        apiPortaService.save(apiPorta);
+                    }
+                }
+            }
+            List<ApiPorta> portas = apiPortaService.obterLista();
+            portas.removeIf(x -> nomes.contains(x.getEndpoint()));
+            for (ApiPorta porta : portas) {
+                apiPortaService.delete(porta);
+            }
+        } catch (Exception ex) {
+        }
     }
 
 }
