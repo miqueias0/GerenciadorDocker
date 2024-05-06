@@ -5,6 +5,7 @@ import br.com.mike.docker.modelo.ApiPorta;
 import br.com.mike.docker.modelo.DockerContainerStats;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.CreateContainerResponse;
+import com.github.dockerjava.api.command.ListContainersCmd;
 import com.github.dockerjava.api.command.PullImageResultCallback;
 import com.github.dockerjava.api.model.Container;
 import com.github.dockerjava.api.model.ExposedPort;
@@ -147,8 +148,13 @@ public class DockerService {
     }
 
     private boolean percorrerListaContainer(List<Container> conainers, Integer index, String containerName) {
-        return (percorrerListaNomes(conainers.get(index).getNames(), 0, containerName)
-                || (conainers.size() < ++index && percorrerListaContainer(conainers, index, containerName)));
+        if(percorrerListaNomes(conainers.get(index).getNames(), 0, containerName)){
+            return true;
+        }
+        if(conainers.size() > ++index){
+            return percorrerListaContainer(conainers, index, containerName);
+        }
+        return false;
     }
 
     private boolean percorrerListaNomes(String[] conainers, Integer index, String containerName) {
@@ -157,14 +163,19 @@ public class DockerService {
     }
 
     private boolean percorrerListaContainerJaAtivo(List<Container> conainers, Integer index, String containerName, String state) {
-        return ((percorrerListaNomes(conainers.get(index).getNames(), 0, containerName)
-                && conainers.get(index).getState().equalsIgnoreCase(state))
-                || (conainers.size() < ++index && percorrerListaContainer(conainers, index, containerName)));
+        if(percorrerListaNomes(conainers.get(index).getNames(), 0, containerName)
+                && conainers.get(index).getState().equalsIgnoreCase(state)){
+            return true;
+        }
+        if(conainers.size() > ++index){
+            return percorrerListaContainerJaAtivo(conainers, index, containerName, state);
+        }
+        return false;
     }
 
     public Integer ultimaPorta() {
         Integer maior = 0;
-        List<Container> containers = obterContainersRunning();
+        List<Container> containers = obterContainers(null);
         for (Container container : containers) {
             for (int i = 0; i < container.getPorts().length; i++) {
                 maior = maior < Optional.ofNullable(container
@@ -175,15 +186,17 @@ public class DockerService {
         return maior;
     }
 
-    private List<Container> obterContainersRunning() {
-        return dockerClient.listContainersCmd()
-                .withShowAll(false)
-                .withStatusFilter(Arrays.asList("running"))
-                .exec();
+    private List<Container> obterContainers(String status) {
+        ListContainersCmd listContainersCmd =
+                dockerClient.listContainersCmd().withShowAll(true);
+        if(status != null){
+            listContainersCmd.withStatusFilter(Arrays.asList("running"));
+        }
+        return listContainersCmd.exec();
     }
 
     public void verificarStatsDocker() throws Exception {
-        List<Container> containers = obterContainersRunning();
+        List<Container> containers = obterContainers("running");
         for (Container container : containers.stream().filter(x ->
                         !(x.getImage().contains("redis")
                                 || x.getImage().contains("ryuk")))
